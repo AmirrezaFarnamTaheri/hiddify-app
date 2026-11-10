@@ -81,3 +81,40 @@ jobs:
           name: hiddify-integration-debug-apk
           path: build/app/outputs/flutter-apk/*.apk
           retention-days: 7
+
+  android-emulator-smoke:
+    name: Launch debug APK on Android emulator
+    needs: android-app-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: hiddify-integration-debug-apk
+          path: integration-apk
+      - name: Enable Android emulator hardware acceleration
+        run: |
+          sudo sh -c 'echo KERNEL=="kvm", GROUP="kvm", MODE="0666" > /etc/udev/rules.d/99-kvm4all.rules'
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -eu
+            APK="$(find integration-apk -type f -name '*.apk' -print -quit)"
+            test -n "$APK"
+            adb install -r "$APK"
+            adb shell am start -n app.hiddify.com/com.hiddify.hiddify.MainActivity
+            sleep 15
+            adb shell pidof app.hiddify.com
+            adb shell svc wifi disable
+            sleep 3
+            adb shell pidof app.hiddify.com
+            adb shell svc wifi enable
+            sleep 3
+            adb shell pidof app.hiddify.com
