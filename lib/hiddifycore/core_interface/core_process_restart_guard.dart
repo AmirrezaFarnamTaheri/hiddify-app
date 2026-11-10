@@ -1,3 +1,5 @@
+import 'dart:async';
+
 /// Prevents a delayed or in-flight process start from outliving shutdown or setup.
 class CoreProcessRestartGuard {
   int _generation = 0;
