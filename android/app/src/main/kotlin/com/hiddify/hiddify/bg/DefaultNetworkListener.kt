@@ -10,6 +10,8 @@ import android.os.Handler
 import android.os.Looper
 import com.hiddify.hiddify.Application
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -27,6 +29,8 @@ object DefaultNetworkListener {
             val response = CompletableDeferred<Network>()
         }
 
+        class Forget(val response: CompletableDeferred<Network>) : NetworkMessage()
+
         class Stop(val key: Any) : NetworkMessage()
 
         class Put(val network: Network) : NetworkMessage()
@@ -41,7 +45,7 @@ object DefaultNetworkListener {
         GlobalScope.actor<NetworkMessage>(Dispatchers.Unconfined) {
             val listeners = mutableMapOf<Any, (Network?) -> Unit>()
             var network: Network? = null
-            val pendingRequests = arrayListOf<NetworkMessage.Get>()
+            val pendingRequests = PendingNetworkRequests<Network>()
             for (message in channel) {
                 when (message) {
                     is NetworkMessage.Start -> {
@@ -51,15 +55,19 @@ object DefaultNetworkListener {
                     }
 
                     is NetworkMessage.Get -> {
-                        check(listeners.isNotEmpty()) { "Getting network without any listeners is not supported" }
-                        if (network == null) {
-                            pendingRequests += message
-                        } else {
-                            message.response.complete(
-                                network,
+                        if (listeners.isEmpty()) {
+                            // Never crash the actor on a Get/Stop race.
+                            message.response.completeExceptionally(
+                                IllegalStateException("Getting network without any listeners is not supported"),
                             )
+                        } else if (network == null) {
+                            pendingRequests.add(message.response)
+                        } else {
+                            message.response.complete(network)
                         }
                     }
+
+                    is NetworkMessage.Forget -> pendingRequests.remove(message.response)
 
                     is NetworkMessage.Stop ->
                         if (listeners.isNotEmpty() &&
@@ -68,14 +76,17 @@ object DefaultNetworkListener {
                             listeners.isEmpty()
                         ) {
                             network = null
+                            pendingRequests.reject(CancellationException("Default network listener stopped"))
                             unregister()
                         }
 
                     is NetworkMessage.Put -> {
-                        network = message.network
-                        pendingRequests.forEach { it.response.complete(message.network) }
-                        pendingRequests.clear()
-                        listeners.values.forEach { it(network) }
+                        // A callback may already be queued when the last listener stops.
+                        if (listeners.isNotEmpty()) {
+                            network = message.network
+                            pendingRequests.resolve(message.network)
+                            listeners.values.forEach { it(network) }
+                        }
                     }
 
                     is NetworkMessage.Update ->
@@ -110,7 +121,13 @@ object DefaultNetworkListener {
     } else {
         NetworkMessage.Get().run {
             networkActor.send(this)
-            response.await()
+            try {
+                withTimeout(15_000L) { response.await() }
+            } finally {
+                // Do not retain a waiter whose caller timed out or was cancelled.
+                response.cancel()
+                networkActor.trySend(NetworkMessage.Forget(response))
+            }
         }
     }
 
