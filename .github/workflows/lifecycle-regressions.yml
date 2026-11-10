@@ -43,3 +43,39 @@ jobs:
         run: flutter pub get
       - name: Run desktop process ownership regressions
         run: flutter test --reporter expanded test/hiddifycore/core_interface/core_process_restart_guard_test.dart
+      - name: Run full Flutter test suite
+        run: flutter test --reporter expanded
+      - name: Analyze complete Flutter/Dart sources
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+  android-app-smoke:
+    name: Android APK compile smoke (no signing)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.5'
+          channel: stable
+          cache: true
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK used by the app
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;28.2.13676358"
+      - name: Prepare generated code and the upstream native core
+        run: make android-apk-prepare
+      - name: Assemble non-release Android application
+        run: flutter build apk --debug --target lib/main.dart
+      - name: Save unsigned debug build for device validation
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiddify-integration-debug-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 7
