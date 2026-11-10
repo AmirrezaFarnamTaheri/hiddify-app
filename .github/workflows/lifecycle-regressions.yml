@@ -43,6 +43,8 @@ jobs:
         run: flutter pub get
       - name: Run desktop process ownership regressions
         run: flutter test --reporter expanded test/hiddifycore/core_interface/core_process_restart_guard_test.dart
+      - name: Generate source used by full Flutter test suite
+        run: make common-prepare
       - name: Run full Flutter test suite
         run: flutter test --reporter expanded
       - name: Analyze complete Flutter/Dart sources
