@@ -50,4 +50,30 @@ class InterfaceUpdateRetryTest {
         assertEquals(3, lookups)
         assertEquals(2, waits)
     }
+    @Test
+    fun negativeAndZeroInterfaceIndicesAreNotPublished() = runBlocking {
+        var lookups = 0
+        var waits = 0
+        val values = listOf(-1, 0, 42)
+        val index = findInterfaceIndexWithRetry(
+            attempts = 3,
+            lookup = { values[lookups++] },
+            pauseBeforeRetry = { waits++ },
+        )
+        assertEquals(42, index)
+        assertEquals(3, lookups)
+        assertEquals(2, waits)
+    }
+
+    @Test
+    fun onlyInvalidIndicesYieldNoInterface() = runBlocking {
+        var waits = 0
+        val index = findInterfaceIndexWithRetry(
+            attempts = 3,
+            lookup = { 0 },
+            pauseBeforeRetry = { waits++ },
+        )
+        assertEquals(null, index)
+        assertEquals(2, waits)
+    }
 }

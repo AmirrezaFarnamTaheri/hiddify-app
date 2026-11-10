@@ -12,7 +12,8 @@ internal suspend fun findInterfaceIndexWithRetry(
         } catch (_: Exception) {
             null
         }
-        if (index != null) return index
+        // NetworkInterface.index may be -1 when unavailable; zero is also unusable.
+        if (index != null && index > 0) return index
         if (attempt + 1 < attempts) pauseBeforeRetry()
     }
     return null
