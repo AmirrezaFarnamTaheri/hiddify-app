@@ -2,6 +2,8 @@ package com.hiddify.hiddify.bg
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import kotlin.coroutines.cancellation.CancellationException
 import org.junit.Test
 
 class InterfaceUpdateRetryTest {
@@ -75,5 +77,24 @@ class InterfaceUpdateRetryTest {
         )
         assertEquals(null, index)
         assertEquals(2, waits)
+    }
+
+    @Test
+    fun cancelledInterfaceLookupPropagatesImmediately() = runBlocking {
+        var calls = 0
+        var waits = 0
+        var cancelled = false
+        try {
+            findInterfaceIndexWithRetry(
+                attempts = 3,
+                lookup = { calls++; throw CancellationException("cancelled") },
+                pauseBeforeRetry = { waits++ },
+            )
+        } catch (_: CancellationException) {
+            cancelled = true
+        }
+        assertTrue(cancelled)
+        assertEquals(1, calls)
+        assertEquals(0, waits)
     }
 }

@@ -1,5 +1,7 @@
 package com.hiddify.hiddify.bg
 
+import kotlin.coroutines.cancellation.CancellationException
+
 /** A successful interface lookup ends retries immediately. Delays are cancellable. */
 internal suspend fun findInterfaceIndexWithRetry(
     attempts: Int,
@@ -9,6 +11,9 @@ internal suspend fun findInterfaceIndexWithRetry(
     for (attempt in 0 until attempts) {
         val index = try {
             lookup()
+        } catch (cancelled: CancellationException) {
+            // Cancellation is terminal, not a missing interface to retry.
+            throw cancelled
         } catch (_: Exception) {
             null
         }

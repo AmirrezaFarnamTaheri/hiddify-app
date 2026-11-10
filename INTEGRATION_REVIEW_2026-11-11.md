@@ -14,7 +14,7 @@ Combines Android network-callback / pending-request safety (draft PR #1) and des
 
 ## Additional interface validation
 
-The interface-lookup retry now rejects non-positive interface indices instead of forwarding `0` or `-1` to the native core. Two regression tests cover retries and a bounded invalid-only outcome. Expected hosted Android JUnit total after this commit: **8 tests**; check the new workflow result before claiming it passed.
+The interface-lookup retry now rejects non-positive interface indices instead of forwarding `0` or `-1` to the native core. Two regression tests cover retries and a bounded invalid-only outcome. The two positive-index regressions passed in hosted JUnit CI on workflow run [42916383599](https://github.com/AmirrezaFarnamTaheri/hiddify-app/actions/runs/42916383599). An additional test verifies that a cancelled lookup propagates immediately instead of being retried. Expected current Android JUnit total: **9**, pending verification of the new workflow.
 
 ## Must verify before merging
 - `flutter test test/hiddifycore/core_interface/core_process_restart_guard_test.dart`
