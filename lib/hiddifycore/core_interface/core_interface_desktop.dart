@@ -12,6 +12,7 @@ import 'package:hiddify/core/model/directories.dart';
 import 'package:hiddify/gen/hiddify_core_generated_bindings.dart';
 import 'package:hiddify/hiddifycore/core_interface/core_interface.dart';
 import 'package:hiddify/hiddifycore/core_interface/core_process.dart';
+import 'package:hiddify/hiddifycore/core_interface/core_process_restart_guard.dart';
 import 'package:hiddify/hiddifycore/core_interface/grpc_client_identity.dart';
 import 'package:hiddify/hiddifycore/core_interface/mtls_channel_cred.dart';
 import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
@@ -124,6 +125,7 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   // is the library loaded into this process (the FFI path below).
   static CoreProcess? _process;
   static Future<CoreProcess> Function()? _startProcess;
+  static final CoreProcessRestartGuard _restartGuard = CoreProcessRestartGuard();
   static final List<DateTime> _restarts = [];
   // A core that keeps crashing is not started again more often than this.
   static const _maxRestarts = 3;
@@ -137,6 +139,9 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   }
 
   Future<String> _setupProcess(String executable, Directories directories, bool debug, int mode) async {
+    // Invalidate old restarts before even awaiting credentials, so shutdown can
+    // cancel this setup before it reaches the process-spawn boundary.
+    final generation = _restartGuard.invalidate();
     final useMtls = _isMtlsMode(mode);
     final setupMode = useMtls ? SetupMode.GRPC_NORMAL.value : SetupMode.GRPC_NORMAL_INSECURE.value;
     // The core trusts the client certificate it finds in the base folder when it is set up, as on
@@ -151,6 +156,8 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       return 'mTLS setup failed: $e';
     }
 
+    if (!_restartGuard.isCurrent(generation)) return 'Core setup cancelled';
+
     _startProcess = () => _startProcessRetrying(
       executable: executable,
       baseDir: directories.baseDir.path,
@@ -164,12 +171,17 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
     var process = _process;
     if (process == null) {
       try {
-        process = await _startProcess!();
+        process = await _restartGuard.launch<CoreProcess>(
+          generation: generation,
+          start: _startProcess!,
+          discard: (stale) => stale.stop(),
+          adopt: _adoptProcess,
+        );
+        if (process == null) return 'Core setup cancelled';
       } catch (e) {
         loggy.error('core process failed to start', e);
         return 'The core failed to start: $e';
       }
-      _adoptProcess(process);
     }
 
     try {
@@ -238,6 +250,7 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   /// Starts the core again after a crash. It listens on the same port with the same certificate (the
   /// core keeps its key), so the open channel reconnects to it on its own.
   Future<void> _restartProcess(CoreProcess crashed) async {
+    final generation = _restartGuard.currentGeneration;
     final start = _startProcess;
     if (start == null) return;
     final now = DateTime.now();
@@ -248,9 +261,16 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
     }
     _restarts.add(now);
     await Future<void>.delayed(const Duration(seconds: 1));
+    if (!_restartGuard.isCurrent(generation) || !identical(_startProcess, start)) return;
     try {
-      final process = await start();
-      _adoptProcess(process);
+      final process = await _restartGuard.launch<CoreProcess>(
+        generation: generation,
+        start: start,
+        discard: (stale) => stale.stop(),
+        adopt: _adoptProcess,
+      );
+      // Shutdown may happen after the guarded adopt but before this await resumes.
+      if (process == null || !_restartGuard.isCurrent(generation) || !identical(_process, process)) return;
       if (process.serverCertificatePem != crashed.serverCertificatePem) {
         loggy.warning('the restarted core has another certificate; it is reached after the next setup');
       }
@@ -271,6 +291,7 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
 
   @override
   Future<void> shutdown() async {
+    _restartGuard.invalidate();
     final process = _process;
     _process = null;
     _startProcess = null;
