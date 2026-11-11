@@ -19,7 +19,7 @@ class DefaultNetworkCallbackSourceTests(unittest.TestCase):
         text = SOURCE.read_text(encoding="utf-8")
         self.assertIn("withTimeout(15_000L)", text)
         self.assertIn("pendingRequests.reject(CancellationException", text)
-        self.assertIn("message.response.cancel()", text)
+        self.assertIn("response.cancel()", text)
         self.assertIn("NetworkMessage.Forget(response)", text)
 
 if __name__ == "__main__":
