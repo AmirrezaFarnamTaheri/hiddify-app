@@ -105,14 +105,25 @@ jobs:
           path: integration-apk
       - name: Unit-test emulator smoke checks before starting the emulator
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
-      - name: Enable Android emulator hardware acceleration
+      - name: Verify hardware acceleration is available for Android emulator
         run: |
-          sudo sh -c 'echo KERNEL=="kvm", GROUP="kvm", MODE="0666" > /etc/udev/rules.d/99-kvm4all.rules'
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          set -euo pipefail
+          if ! test -c /dev/kvm; then
+            echo "::error::Emulator cannot run: /dev/kvm unavailable on this runner"
+            exit 1
+          fi
+          # udev cannot reliably change permissions on an already-created device.
+          # Apply the access mode immediately, before the emulator action detects KVM.
+          sudo chmod 666 /dev/kvm
+          if ! (test -r /dev/kvm && test -w /dev/kvm); then
+            echo "::error::Emulator cannot run: /dev/kvm unavailable to current user"
+            exit 1
+          fi
+          stat -c 'KVM device: %n mode=%a owner=%U group=%G' /dev/kvm
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
+          emulator-boot-timeout: 900
           arch: x86_64
           target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
