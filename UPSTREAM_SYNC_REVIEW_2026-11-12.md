@@ -15,3 +15,14 @@ handover all succeed on this exact upstream-derived head. Do not release
 or merge on skipped, cancelled, pending, or failing required checks. Keep the
 fork's network-change and desktop restart protections in the effective merge.
 Version-tag and manually dispatched release workflows are separate.
+
+## Combined-branch CI memory fix
+
+[Workflow 43113066559](https://github.com/AmirrezaFarnamTaheri/hiddify-app/actions/runs/43113066559)
+passed the Android network and Flutter/analysis gates but the Android APK task
+failed in JetifierTransform of an official Flutter arm64 debug runtime jar:
+`Java heap space`. No app compilation error or credentials failure was reported.
+The Android Gradle daemon heap is increased from 4048 MB to 5120 MB, with a
+bounded 768 MB metaspace and concurrent Gradle workers disabled. The full
+APK, test and emulator checks remain required and must be re-run. This fix
+does not skip transforms, exclude architectures or suppress the build error.
