@@ -29,6 +29,8 @@ jobs:
           gradle-version: '8.7'
       - name: Run network helper regressions
         run: gradle -p tools/network-jvm-tests --no-daemon test
+      - name: Check OS callbacks never block waiting for the actor
+        run: python3 -m unittest discover -s .github/scripts -p 'test_network_callback_source.py'
 
   desktop-guard-dart:
     name: Desktop lifecycle guard (Flutter test)
