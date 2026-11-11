@@ -12,12 +12,12 @@ import com.hiddify.hiddify.Application
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.ObsoleteCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.actor
-import kotlinx.coroutines.runBlocking
 import java.net.UnknownHostException
 
 
@@ -40,9 +40,13 @@ object DefaultNetworkListener {
         class Lost(val network: Network) : NetworkMessage()
     }
 
-    @OptIn(DelicateCoroutinesApi::class, ObsoleteCoroutinesApi::class)
+    // Process-wide singleton: actor stays alive across start/stop cycles, but
+    // callbacks never execute or wait on its message-processing coroutine.
+    private val actorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @OptIn(ObsoleteCoroutinesApi::class)
     private val networkActor =
-        GlobalScope.actor<NetworkMessage>(Dispatchers.Unconfined) {
+        actorScope.actor<NetworkMessage>(capacity = Channel.UNLIMITED) {
             val listeners = mutableMapOf<Any, (Network?) -> Unit>()
             var network: Network? = null
             val pendingRequests = PendingNetworkRequests<Network>()
@@ -133,27 +137,26 @@ object DefaultNetworkListener {
 
     suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
 
+    // OS connectivity callbacks must not block. The actor processes these
+    // in FIFO order even if a registration handler is slow.
+    private fun dispatch(message: NetworkMessage) {
+        if (networkActor.trySend(message).isFailure) {
+            android.util.Log.w("DefaultNetworkListener", "Default-network actor unexpectedly closed")
+        }
+    }
+
     // NB: this runs in ConnectivityThread, and this behavior cannot be changed until API 26
     private object Callback : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = runBlocking {
-            networkActor.send(
-                NetworkMessage.Put(
-                    network,
-                ),
-            )
+        override fun onAvailable(network: Network) {
+            dispatch(NetworkMessage.Put(network))
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            // it's a good idea to refresh capabilities
-            runBlocking { networkActor.send(NetworkMessage.Update(network)) }
+            dispatch(NetworkMessage.Update(network))
         }
 
-        override fun onLost(network: Network) = runBlocking {
-            networkActor.send(
-                NetworkMessage.Lost(
-                    network,
-                ),
-            )
+        override fun onLost(network: Network) {
+            dispatch(NetworkMessage.Lost(network))
         }
     }
 
