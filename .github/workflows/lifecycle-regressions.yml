@@ -1,0 +1,117 @@
+name: Hiddify lifecycle regression checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - 'integration/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-network-jvm:
+    name: Android network helpers (real JUnit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Run network helper regressions
+        run: gradle -p tools/network-jvm-tests --no-daemon test
+
+  desktop-guard-dart:
+    name: Desktop lifecycle guard (Flutter test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.5'
+          channel: stable
+          cache: true
+      - name: Resolve project dependencies
+        run: flutter pub get
+      - name: Run desktop process ownership regressions
+        run: flutter test --reporter expanded test/hiddifycore/core_interface/core_process_restart_guard_test.dart
+      - name: Generate source used by full Flutter test suite
+        run: make common-prepare
+      - name: Run full Flutter test suite
+        run: flutter test --reporter expanded
+      - name: Analyze complete Flutter/Dart sources
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+  android-app-smoke:
+    name: Android APK compile smoke (no signing)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.5'
+          channel: stable
+          cache: true
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK used by the app
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;28.2.13676358"
+      - name: Prepare generated code and the upstream native core
+        run: make android-apk-prepare
+      - name: Assemble non-release Android application
+        run: flutter build apk --debug --target lib/main.dart
+      - name: Save unsigned debug build for device validation
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hiddify-integration-debug-apk
+          path: build/app/outputs/flutter-apk/*.apk
+          retention-days: 7
+
+  android-emulator-smoke:
+    name: Launch debug APK on Android emulator
+    needs: android-app-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: hiddify-integration-debug-apk
+          path: integration-apk
+      - name: Unit-test emulator smoke checks before starting the emulator
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Enable Android emulator hardware acceleration
+        run: |
+          sudo sh -c 'echo KERNEL=="kvm", GROUP="kvm", MODE="0666" > /etc/udev/rules.d/99-kvm4all.rules'
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash .github/scripts/android-emulator-smoke.sh
