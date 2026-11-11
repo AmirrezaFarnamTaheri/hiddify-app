@@ -21,6 +21,9 @@ if args[:2] == ['install', '-r']:
   sys.exit(0 if len(args)==3 and pathlib.Path(args[2]).exists() else 2)
 if args[:2] == ['logcat', '-c']: sys.exit(0)
 if args[:2] == ['logcat', '-d']:
+  if os.getenv('ADB_LOGCAT_FAIL') == '1':
+    print('adb: logcat read failed', file=sys.stderr)
+    sys.exit(2)
   if os.getenv('ADB_CRASH') == '1' and state.exists():
     print('E AndroidRuntime: FATAL EXCEPTION: main')
     print('E AndroidRuntime: Process: app.hiddify.com, PID: 1234')
@@ -45,7 +48,7 @@ sys.exit(2)
 '''
 
 class SmokeTests(unittest.TestCase):
-    def run_smoke(self, with_apk=True, crash=False):
+    def run_smoke(self, with_apk=True, crash=False, logcat_fail=False, extra_apks=()):
         with tempfile.TemporaryDirectory() as d:
             root=pathlib.Path(d)
             binary=root/'adb'
@@ -54,8 +57,10 @@ class SmokeTests(unittest.TestCase):
             (root/'integration-apk').mkdir()
             if with_apk:
                 (root/'integration-apk'/'app-debug.apk').write_bytes(b'fake')
+            for name in extra_apks:
+                (root/'integration-apk'/name).write_bytes(b'fake')
             env=os.environ.copy()
-            env.update(PATH=str(root)+os.pathsep+env['PATH'], ADB_STATE=str(root/'state'), ADB_LOG=str(root/'adb.log'), ADB_CRASH=('1' if crash else '0'))
+            env.update(PATH=str(root)+os.pathsep+env['PATH'], ADB_STATE=str(root/'state'), ADB_LOG=str(root/'adb.log'), ADB_CRASH=('1' if crash else '0'), ADB_LOGCAT_FAIL=('1' if logcat_fail else '0'))
             p=subprocess.run(['bash', str(SCRIPT)], cwd=root, env=env, text=True, capture_output=True)
             return p, (root/'adb.log').read_text() if (root/'adb.log').exists() else ''
     def test_starts_downloaded_apk_and_validates_wifi_toggles(self):
@@ -72,5 +77,13 @@ class SmokeTests(unittest.TestCase):
         p, _ = self.run_smoke(crash=True)
         self.assertNotEqual(0, p.returncode)
         self.assertIn('FATAL EXCEPTION', p.stderr)
+    def test_chooses_universal_apk_when_multiple_abi_apks_exist(self):
+        p, log = self.run_smoke(extra_apks=('app-x86_64-debug.apk', 'app-arm64-v8a-debug.apk', 'app-armeabi-v7a-debug.apk'))
+        self.assertEqual(0, p.returncode, p.stderr+p.stdout)
+        self.assertIn('install -r integration-apk/app-debug.apk', log)
+    def test_fails_closed_when_crash_logs_are_unreadable(self):
+        p, _ = self.run_smoke(logcat_fail=True)
+        self.assertNotEqual(0, p.returncode)
+        self.assertIn('failed to read Android runtime crash logs', p.stderr)
 
 if __name__=='__main__': unittest.main()
