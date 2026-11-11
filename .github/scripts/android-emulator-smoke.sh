@@ -21,12 +21,17 @@ if [[ "$booted" != true ]]; then
 fi
 
 mapfile -t apks < <(find integration-apk -type f -name '*.apk' -print)
-if (( ${#apks[@]} != 1 )); then
-  echo "ERROR: expected exactly one downloaded APK, found ${#apks[@]}" >&2
+mapfile -t universal_apks < <(find integration-apk -type f -name 'app-debug.apk' -print)
+if (( ${#universal_apks[@]} == 1 )); then
+  apk="${universal_apks[0]}"
+elif (( ${#universal_apks[@]} == 0 && ${#apks[@]} == 1 )); then
+  apk="${apks[0]}"
+else
+  echo "ERROR: expected a unique universal app-debug.apk or exactly one downloaded APK; found ${#apks[@]} APKs" >&2
   find integration-apk -maxdepth 3 -type f -print >&2
   exit 1
 fi
-adb install -r "${apks[0]}"
+adb install -r "$apk"
 
 adb logcat -c
 adb shell am start -W -n "$package/$activity"
@@ -49,11 +54,16 @@ assert_app_healthy() {
   fi
   original_pid="$pid"
 
-  if adb logcat -d -v brief -s AndroidRuntime:E | awk -v target="Process: $package" '
+  local runtime_logs
+  if ! runtime_logs="$(adb logcat -d -v brief -s AndroidRuntime:E)"; then
+    echo 'ERROR: failed to read Android runtime crash logs' >&2
+    exit 1
+  fi
+  if awk -v target="Process: $package" '
     /FATAL EXCEPTION/ { fatal = 1 }
     /Process: / { if (fatal && index($0, target)) crashed = 1; fatal = 0 }
     END { exit !crashed }
-  '; then
+  ' <<< "$runtime_logs"; then
     echo "ERROR: FATAL EXCEPTION observed for $package" >&2
     exit 1
   fi
