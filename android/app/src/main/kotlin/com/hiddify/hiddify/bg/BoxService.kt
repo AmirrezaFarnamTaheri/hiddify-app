@@ -415,7 +415,18 @@ class BoxService(
 
         GlobalScope.launch(Dispatchers.IO) {
             Settings.startedByUser = true
-            initialize()
+            try {
+                initialize()
+            } catch (failure: Exception) {
+                Log.e(TAG, "Service initialization failed", failure)
+                // No native setup or network registration occurred yet.
+                stopAndAlert(
+                    Alert.StartService,
+                    failure.message ?: failure.toString(),
+                    StartupResourceRollback(),
+                )
+                return@launch
+            }
 //            try {
 //                startCommandServer()
 //            } catch (e: Exception) {
