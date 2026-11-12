@@ -84,7 +84,7 @@ void main() {
     final result = await guard.finishSetup(
       generation: guard.currentGeneration,
       initialize: () async => 'gRPC hello failed',
-      rollback: () async => rollbacks++,
+      rollback: () async { rollbacks++; },
     );
     expect(result, 'gRPC hello failed');
     expect(rollbacks, 1);
@@ -97,7 +97,7 @@ void main() {
     final setup = guard.finishSetup(
       generation: guard.currentGeneration,
       initialize: () => pending.future,
-      rollback: () async => rollbacks++,
+      rollback: () async { rollbacks++; },
     );
     guard.invalidate();
     pending.complete('');
@@ -111,7 +111,7 @@ void main() {
     final result = await guard.finishSetup(
       generation: guard.currentGeneration,
       initialize: () async => '',
-      rollback: () async => rollbacks++,
+      rollback: () async { rollbacks++; },
     );
     expect(result, '');
     expect(rollbacks, 0);
@@ -124,7 +124,7 @@ void main() {
       guard.finishSetup(
         generation: guard.currentGeneration,
         initialize: () async => throw StateError('bad channel'),
-        rollback: () async => rollbacks++,
+        rollback: () async { rollbacks++; },
       ),
       throwsStateError,
     );
