@@ -1215,7 +1215,7 @@
     "reconnectMsg": "Reconnecting to apply changes…",
     "health": {
       "title": "Connection check",
-      "allGood": "Your traffic gets through",
+      "allGood": "Core checks indicate the selected proxy is reachable",
       "pickDead": "Selected proxy isn’t responding",
       "hopPending": "${chain} is connecting…",
       "hopFailed": "${chain} couldn’t connect",
