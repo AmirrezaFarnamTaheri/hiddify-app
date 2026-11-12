@@ -1,3 +1,4 @@
+# Integration verification of desktop rollback changes; no workflow steps bypassed.
 name: Hiddify lifecycle regression checks
 
 on:
