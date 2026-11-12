@@ -44,7 +44,7 @@ class BoxServiceStartupUnwindContract(unittest.TestCase):
         entry = code.split("internal fun onStartCommand()", 1)[1].split(
             "fun onBind(", 1
         )[0]
-        self.assertRegex(entry, r"try\\s*\\{\\s*initialize\\(\\)")
+        self.assertRegex(entry, r"try\s*\{\s*initialize\(\)")
         self.assertIn("stopAndAlert(Alert.StartService", entry)
         self.assertIn("StartupResourceRollback()", entry)
 
