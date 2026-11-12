@@ -206,7 +206,7 @@ class ConnectionHealthSheet extends ConsumerWidget {
                 switch (probe.outcome) {
                   UrlProbeOutcome.responded => '${h.probeResponded} · ${probe.latencyMs} ms',
                   UrlProbeOutcome.noReply => h.probeNoReply,
-                  UrlProbeOutcome.notTested => h.probeNotTested,
+                  UrlProbeOutcome.unknown => h.probeUnknown,
                 },
                 style: theme.textTheme.bodyMedium,
               ),
