@@ -30,6 +30,8 @@ class ProbeProvenanceIntegrationContract(unittest.TestCase):
     def test_diagnostics_panel_only_shows_derived_metadata(self):
         source = SHEET.read_text(encoding="utf-8")
         self.assertIn("ProbeProvenance.fromOutbound(health.server!)", source)
+        # A disconnected service cannot present an old URL observation as active.
+        self.assertIn("health.status.isRunning && health.server != null", source)
         self.assertIn("h.probeTimeUnknown", source)
         self.assertIn("h.probeLimit", source)
         for code in ("UrlProbeOutcome.responded", "IpProbeSource.cached",
