@@ -90,6 +90,27 @@ void main() {
     expect(rollbacks, 1);
   });
 
+  test('already cancelled setup does not run post-shutdown initializer', () async {
+    final guard = CoreProcessRestartGuard();
+    final oldGeneration = guard.currentGeneration;
+    guard.invalidate();
+    var called = false;
+    var rollbacks = 0;
+    final result = await guard.finishSetup(
+      generation: oldGeneration,
+      initialize: () async {
+        called = true;
+        return '';
+      },
+      rollback: () async {
+        rollbacks++;
+      },
+    );
+    expect(result, 'Core setup cancelled');
+    expect(called, isFalse);
+    expect(rollbacks, 1);
+  });
+
   test('shutdown during startup validation cancels and rolls back', () async {
     final guard = CoreProcessRestartGuard();
     final pending = Completer<String>();
