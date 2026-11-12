@@ -1233,7 +1233,20 @@
       "hopBlocked": "Waits for the selected proxy to respond",
       "retry": "Test again",
       "change": "Change",
-      "turnOff": "Turn off"
+      "turnOff": "Turn off",
+      "probeEvidenceTitle": "Test evidence",
+      "probeEvidenceSource": "Source: core URL test through the selected proxy (not direct TCP ping)",
+      "probeResponded": "Core URL test responded",
+      "probeNoReply": "Core URL test received no reply",
+      "probeNotTested": "Core URL test not completed",
+      "probeTimeUnknown": "Result time unavailable; a previous network's result may remain",
+      "probeIpNonCached": "IP lookup: non-cached core result",
+      "probeIpCached": "IP lookup: cached, possibly stale",
+      "probeIpUnavailable": "IP lookup: unavailable",
+      "probeFamilyV4": "Observed IP family: IPv4",
+      "probeFamilyV6": "Observed IP family: IPv6",
+      "probeFamilyUnknown": "Observed IP family: unknown",
+      "probeLimit": "This URL test cannot prove device-wide VPN routing, DNS privacy or absence of leaks."
     }
   },
   "errors": {
