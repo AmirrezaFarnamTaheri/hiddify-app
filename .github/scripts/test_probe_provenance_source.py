@@ -8,7 +8,7 @@ MODEL = ROOT / "lib/features/proxy/model/probe_provenance.dart"
 SHEET = ROOT / "lib/features/connection/widget/connection_health_sheet.dart"
 KEYS = (
     "probeEvidenceTitle", "probeEvidenceSource", "probeResponded",
-    "probeNoReply", "probeNotTested", "probeTimeUnknown", "probeIpNonCached",
+    "probeNoReply", "probeUnknown", "probeTimeUnknown", "probeIpNonCached",
     "probeIpCached", "probeIpUnavailable", "probeFamilyV4",
     "probeFamilyV6", "probeFamilyUnknown", "probeLimit",
 )
