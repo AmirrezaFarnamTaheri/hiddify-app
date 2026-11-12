@@ -4,7 +4,7 @@ import 'package:hiddify/core/model/constants.dart';
 import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 
 /// The core reports a URL-test delay, not a device-wide route or DNS leak test.
-enum UrlProbeOutcome { notTested, responded, noReply }
+enum UrlProbeOutcome { unknown, responded, noReply }
 
 /// The core's IP metadata can outlive a network handover when cached.
 enum IpProbeSource { unavailable, cached, nonCached }
@@ -26,7 +26,7 @@ class ProbeProvenance {
   factory ProbeProvenance.fromOutbound(OutboundInfo outbound) {
     final delay = outbound.urlTestDelay;
     final outcome = switch (delay) {
-      0 => UrlProbeOutcome.notTested,
+      0 => UrlProbeOutcome.unknown,
       _ when ConnectionConst.isValidDelay(delay) => UrlProbeOutcome.responded,
       _ => UrlProbeOutcome.noReply,
     };
