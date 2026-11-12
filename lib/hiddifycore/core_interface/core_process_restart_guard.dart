@@ -32,4 +32,28 @@ class CoreProcessRestartGuard {
     }
     return resource;
   }
+  /// Finalize a started core only if its setup succeeds and the lifecycle is
+  /// still current. Failed and stale startups must release newly-owned resources.
+  Future<String> finishSetup({
+    required int generation,
+    required Future<String> Function() initialize,
+    required Future<void> Function() rollback,
+  }) async {
+    String result;
+    try {
+      result = await initialize();
+    } catch (_) {
+      await rollback();
+      rethrow;
+    }
+    if (!isCurrent(generation)) {
+      await rollback();
+      return 'Core setup cancelled';
+    }
+    if (result.isNotEmpty) {
+      await rollback();
+    }
+    return result;
+  }
+
 }
