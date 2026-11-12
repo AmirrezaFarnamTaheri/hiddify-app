@@ -9,6 +9,7 @@ import 'package:hiddify/features/chain/overview/chain_mode_icon.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_notifier.dart';
 import 'package:hiddify/features/proxy/model/connection_health.dart';
 import 'package:hiddify/features/proxy/model/proxy_entity.dart';
+import 'package:hiddify/features/proxy/model/probe_provenance.dart';
 import 'package:hiddify/features/settings/data/config_option_repository.dart';
 import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 import 'package:hiddify/singbox/model/singbox_config_enum.dart';
@@ -51,6 +52,7 @@ class ConnectionHealthSheet extends ConsumerWidget {
         ),
       );
     }
+    final probe = health.server == null ? null : ProbeProvenance.fromOutbound(health.server!);
     final chain = health.chain;
     final chainName = chain?.present(t) ?? '';
     final active = ref.read(activeProxyNotifierProvider.notifier);
@@ -192,6 +194,40 @@ class ConnectionHealthSheet extends ConsumerWidget {
                   .animate(delay: (60 * i).ms)
                   .fadeIn(duration: 220.ms)
                   .slideY(begin: .15, end: 0, duration: 220.ms, curve: Curves.easeOutCubic),
+            if (probe != null) ...[
+              const Divider(),
+              const Gap(8),
+              Text(h.probeEvidenceTitle, style: theme.textTheme.titleSmall),
+              const Gap(8),
+              Text(h.probeEvidenceSource, style: theme.textTheme.bodySmall),
+              Text(
+                switch (probe.outcome) {
+                  UrlProbeOutcome.responded => '${h.probeResponded} · ${probe.latencyMs} ms',
+                  UrlProbeOutcome.noReply => h.probeNoReply,
+                  UrlProbeOutcome.notTested => h.probeNotTested,
+                },
+                style: theme.textTheme.bodyMedium,
+              ),
+              Text(h.probeTimeUnknown, style: theme.textTheme.bodySmall),
+              Text(
+                switch (probe.ipSource) {
+                  IpProbeSource.nonCached => h.probeIpNonCached,
+                  IpProbeSource.cached => h.probeIpCached,
+                  IpProbeSource.unavailable => h.probeIpUnavailable,
+                },
+                style: theme.textTheme.bodySmall,
+              ),
+              Text(
+                switch (probe.family) {
+                  ObservedIpFamily.ipv4 => h.probeFamilyV4,
+                  ObservedIpFamily.ipv6 => h.probeFamilyV6,
+                  ObservedIpFamily.unknown => h.probeFamilyUnknown,
+                },
+                style: theme.textTheme.bodySmall,
+              ),
+              const Gap(8),
+              Text(h.probeLimit, style: theme.textTheme.bodySmall),
+            ],
             const Gap(8),
             Align(
               alignment: AlignmentDirectional.centerEnd,
