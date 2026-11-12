@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - 'integration/**'
-      - 'fix/**'
   workflow_dispatch:
 
 permissions:
