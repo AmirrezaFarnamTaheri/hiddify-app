@@ -39,6 +39,15 @@ class BoxServiceStartupUnwindContract(unittest.TestCase):
         self.assertIn("stopAndAlert(Alert.StartService, e.message, resources)", self.start)
         self.assertLess(self.start.index("notification.start()"), self.start.index("status.postValue(Status.Started)"))
 
+    def test_early_initialize_error_uses_the_same_non_native_cleanup_path(self):
+        code = SOURCE.read_text(encoding="utf-8")
+        entry = code.split("internal fun onStartCommand()", 1)[1].split(
+            "fun onBind(", 1
+        )[0]
+        self.assertRegex(entry, r"try\\s*\\{\\s*initialize\\(\\)")
+        self.assertIn("stopAndAlert(Alert.StartService", entry)
+        self.assertIn("StartupResourceRollback()", entry)
+
     def test_rollback_releases_tun_network_and_native_before_reporting_stopped(self):
         self.assertIn("withContext(NonCancellable + Dispatchers.IO)", self.fail)
         for element in (
