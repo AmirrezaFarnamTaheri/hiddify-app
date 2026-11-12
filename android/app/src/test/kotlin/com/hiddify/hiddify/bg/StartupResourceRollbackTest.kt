@@ -64,7 +64,7 @@ class StartupResourceRollbackTest {
     }
 
     @Test
-    fun rollbackIsSingleUseEvenWhenStopAndFailureRace() = runBlocking {
+    fun duplicateRollbackRequestRunsCleanupOnlyOnce() = runBlocking {
         val resources = StartupResourceRollback()
         resources.beforeNetworkStart()
         resources.beforeCoreSetup()
