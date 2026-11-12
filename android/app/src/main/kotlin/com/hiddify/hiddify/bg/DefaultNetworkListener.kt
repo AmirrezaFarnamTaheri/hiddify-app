@@ -33,11 +33,11 @@ object DefaultNetworkListener {
 
         class Stop(val key: Any) : NetworkMessage()
 
-        class Put(val network: Network) : NetworkMessage()
+        class Put(val network: Network, val generation: Long) : NetworkMessage()
 
-        class Update(val network: Network) : NetworkMessage()
+        class Update(val network: Network, val generation: Long) : NetworkMessage()
 
-        class Lost(val network: Network) : NetworkMessage()
+        class Lost(val network: Network, val generation: Long) : NetworkMessage()
     }
 
     // Process-wide singleton: actor stays alive across start/stop cycles, but
@@ -50,10 +50,15 @@ object DefaultNetworkListener {
             val listeners = mutableMapOf<Any, (Network?) -> Unit>()
             var network: Network? = null
             val pendingRequests = PendingNetworkRequests<Network>()
+            val callbackEpoch = NetworkCallbackEpoch()
+            var registeredCallback: ConnectivityManager.NetworkCallback? = null
             for (message in channel) {
                 when (message) {
                     is NetworkMessage.Start -> {
-                        if (listeners.isEmpty()) register()
+                        if (listeners.isEmpty()) {
+                            val generation = callbackEpoch.newRegistration()
+                            registeredCallback = register(generation)
+                        }
                         listeners[message.key] = message.listener
                         if (network != null) message.listener(network)
                     }
@@ -80,13 +85,15 @@ object DefaultNetworkListener {
                             listeners.isEmpty()
                         ) {
                             network = null
+                            callbackEpoch.stop()
                             pendingRequests.reject(CancellationException("Default network listener stopped"))
-                            unregister()
+                            registeredCallback?.let { unregister(it) }
+                            registeredCallback = null
                         }
 
                     is NetworkMessage.Put -> {
                         // A callback may already be queued when the last listener stops.
-                        if (listeners.isNotEmpty()) {
+                        if (listeners.isNotEmpty() && callbackEpoch.accepts(message.generation)) {
                             network = message.network
                             pendingRequests.resolve(message.network)
                             listeners.values.forEach { it(network) }
@@ -94,7 +101,7 @@ object DefaultNetworkListener {
                     }
 
                     is NetworkMessage.Update ->
-                        if (network == message.network) {
+                        if (callbackEpoch.accepts(message.generation) && network == message.network) {
                             listeners.values.forEach {
                                 it(
                                     network,
@@ -103,7 +110,7 @@ object DefaultNetworkListener {
                         }
 
                     is NetworkMessage.Lost ->
-                        if (network == message.network) {
+                        if (callbackEpoch.accepts(message.generation) && network == message.network) {
                             network = null
                             listeners.values.forEach { it(null) }
                         }
@@ -146,17 +153,17 @@ object DefaultNetworkListener {
     }
 
     // NB: this runs in ConnectivityThread, and this behavior cannot be changed until API 26
-    private object Callback : ConnectivityManager.NetworkCallback() {
+    private class Callback(private val generation: Long) : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            dispatch(NetworkMessage.Put(network))
+            dispatch(NetworkMessage.Put(network, generation))
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            dispatch(NetworkMessage.Update(network))
+            dispatch(NetworkMessage.Update(network, generation))
         }
 
         override fun onLost(network: Network) {
-            dispatch(NetworkMessage.Lost(network))
+            dispatch(NetworkMessage.Lost(network, generation))
         }
     }
 
@@ -182,14 +189,15 @@ object DefaultNetworkListener {
      *
      * Source: https://android.googlesource.com/platform/frameworks/base/+/2df4c7d/services/core/java/com/android/server/ConnectivityService.java#887
      */
-    private fun register() {
+    private fun register(generation: Long): ConnectivityManager.NetworkCallback {
+        val callback = Callback(generation)
         when (Build.VERSION.SDK_INT) {
             in 31..Int.MAX_VALUE ->
                 @TargetApi(31)
                 {
                     Application.connectivity.registerBestMatchingNetworkCallback(
                         request,
-                        Callback,
+                        callback,
                         mainHandler,
                     )
                 }
@@ -197,35 +205,35 @@ object DefaultNetworkListener {
             in 28 until 31 ->
                 @TargetApi(28)
                 { // we want REQUEST here instead of LISTEN
-                    Application.connectivity.requestNetwork(request, Callback, mainHandler)
+                    Application.connectivity.requestNetwork(request, callback, mainHandler)
                 }
 
             in 26 until 28 ->
                 @TargetApi(26)
                 {
-                    Application.connectivity.registerDefaultNetworkCallback(Callback, mainHandler)
+                    Application.connectivity.registerDefaultNetworkCallback(callback, mainHandler)
                 }
 
             in 24 until 26 ->
                 @TargetApi(24)
                 {
-                    Application.connectivity.registerDefaultNetworkCallback(Callback)
+                    Application.connectivity.registerDefaultNetworkCallback(callback)
                 }
 
             else ->
                 try {
                     fallback = false
-                    Application.connectivity.requestNetwork(request, Callback)
+                    Application.connectivity.requestNetwork(request, callback)
                 } catch (e: RuntimeException) {
                     fallback =
                         true // known bug on API 23: https://stackoverflow.com/a/33509180/2245107
                 }
         }
+        return callback
     }
-
-    private fun unregister() {
+    private fun unregister(callback: ConnectivityManager.NetworkCallback) {
         runCatching {
-            Application.connectivity.unregisterNetworkCallback(Callback)
+            Application.connectivity.unregisterNetworkCallback(callback)
         }
     }
 }
