@@ -52,7 +52,9 @@ class ConnectionHealthSheet extends ConsumerWidget {
         ),
       );
     }
-    final probe = health.server == null ? null : ProbeProvenance.fromOutbound(health.server!);
+    final probe = health.status.isRunning && health.server != null
+        ? ProbeProvenance.fromOutbound(health.server!)
+        : null;
     final chain = health.chain;
     final chainName = chain?.present(t) ?? '';
     final active = ref.read(activeProxyNotifierProvider.notifier);
