@@ -169,6 +169,7 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       debug: debug,
     );
     var process = _process;
+    final startedHere = process == null;
     if (process == null) {
       try {
         process = await _restartGuard.launch<CoreProcess>(
@@ -184,13 +185,31 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       }
     }
 
-    try {
-      _credentials = identity == null ? const ChannelCredentials.insecure() : _processCredentials(process, identity);
-    } catch (e, st) {
-      loggy.error('mTLS credentials failed', e, st);
-      return 'mTLS setup failed: $e';
-    }
-    return _connect();
+    final runningProcess = process;
+    return _restartGuard.finishSetup(
+      generation: generation,
+      initialize: () async {
+        try {
+          _credentials = identity == null
+              ? const ChannelCredentials.insecure()
+              : _processCredentials(runningProcess, identity);
+        } catch (e, st) {
+          loggy.error('mTLS credentials failed', e, st);
+          return 'mTLS setup failed: $e';
+        }
+        return _connect(generation: generation);
+      },
+      rollback: () async {
+        // Do not tear down an inherited process or one owned by a newer setup.
+        if (!startedHere || !identical(_process, runningProcess)) return;
+        _process = null;
+        if (_restartGuard.isCurrent(generation)) {
+          _restartGuard.invalidate();
+          _startProcess = null;
+        }
+        await runningProcess.stop();
+      },
+    );
   }
 
   /// Starts the core, waiting a little when its port is still taken: a core that was just asked to
@@ -335,7 +354,10 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   }
 
   /// Checks that the core answers, then replaces the channel and the clients.
-  Future<String> _connect() async {
+  Future<String> _connect({int? generation}) async {
+    if (generation != null && !_restartGuard.isCurrent(generation)) {
+      return 'Core setup cancelled';
+    }
     final helloChannel = ClientChannel(
       '127.0.0.1',
       port: port,
@@ -352,6 +374,11 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       unawaited(helloChannel.shutdown());
     }
 
+    // The hello RPC can finish after shutdown. Never install stale channels
+    // or announce a core connection after the owning generation is invalidated.
+    if (generation != null && !_restartGuard.isCurrent(generation)) {
+      return 'Core setup cancelled';
+    }
     final previousChannel = _channel;
     _channel = ClientChannel(
       '127.0.0.1',
