@@ -39,6 +39,10 @@ class CoreProcessRestartGuard {
     required Future<String> Function() initialize,
     required Future<void> Function() rollback,
   }) async {
+    if (!isCurrent(generation)) {
+      await rollback();
+      return 'Core setup cancelled';
+    }
     String result;
     try {
       result = await initialize();
