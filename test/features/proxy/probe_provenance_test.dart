@@ -9,9 +9,9 @@ OutboundInfo proxy(int delay, {String ip = '', bool cached = false}) => Outbound
 );
 
 void main() {
-  test('no native URL result is unknown, not an HTTP failure', () {
+  test('zero native delay is ambiguous between no measurement and failure', () {
     final evidence = ProbeProvenance.fromOutbound(proxy(0));
-    expect(evidence.outcome, UrlProbeOutcome.notTested);
+    expect(evidence.outcome, UrlProbeOutcome.unknown);
     expect(evidence.latencyMs, isNull);
     expect(evidence.observedAt, isNull);
     expect(evidence.provesDeviceWideRouting, isFalse);
