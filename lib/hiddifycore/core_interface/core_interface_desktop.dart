@@ -169,6 +169,7 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       debug: debug,
     );
     var process = _process;
+    final startedHere = process == null;
     if (process == null) {
       try {
         process = await _restartGuard.launch<CoreProcess>(
@@ -184,13 +185,31 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       }
     }
 
-    try {
-      _credentials = identity == null ? const ChannelCredentials.insecure() : _processCredentials(process, identity);
-    } catch (e, st) {
-      loggy.error('mTLS credentials failed', e, st);
-      return 'mTLS setup failed: $e';
-    }
-    return _connect();
+    final runningProcess = process;
+    return _restartGuard.finishSetup(
+      generation: generation,
+      initialize: () async {
+        try {
+          _credentials = identity == null
+              ? const ChannelCredentials.insecure()
+              : _processCredentials(runningProcess, identity);
+        } catch (e, st) {
+          loggy.error('mTLS credentials failed', e, st);
+          return 'mTLS setup failed: $e';
+        }
+        return _connect(generation: generation);
+      },
+      rollback: () async {
+        // Do not tear down an inherited process or one owned by a newer setup.
+        if (!startedHere || !identical(_process, runningProcess)) return;
+        _process = null;
+        if (_restartGuard.isCurrent(generation)) {
+          _restartGuard.invalidate();
+          _startProcess = null;
+        }
+        await runningProcess.stop();
+      },
+    );
   }
 
   /// Starts the core, waiting a little when its port is still taken: a core that was just asked to
@@ -237,11 +256,26 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   void _adoptProcess(CoreProcess process) {
     _process = process;
     unawaited(
-      process.exitCode.then((code) {
+      process.exitCode.then((code) async {
         if (!identical(_process, process) || process.stopping) return;
+        final crashedGeneration = _restartGuard.currentGeneration;
         _process = null;
-        loggy.error('core process exited unexpectedly ($code)');
-        onCoreProcessExited('The core stopped unexpectedly (exit code $code).');
+        // Upstream #6: capture stderr before restarting, otherwise the
+        // crash report may be overwritten by the next core process.
+        String? reason;
+        try {
+          reason = await process.crashReason();
+        } catch (e) {
+          loggy.error('could not retrieve core crash reason', e);
+        }
+        // PR #7: shutdown or another setup may have won during the await.
+        if (!_restartGuard.isCurrent(crashedGeneration) || _process != null || process.stopping) return;
+        loggy.error('core process exited unexpectedly ($code)${reason == null ? '' : ': $reason'}');
+        onCoreProcessExited(
+          reason == null
+              ? 'The core stopped unexpectedly (exit code $code).'
+              : 'The core stopped unexpectedly (exit code $code): $reason',
+        );
         unawaited(_restartProcess(process));
       }),
     );
@@ -335,7 +369,10 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
   }
 
   /// Checks that the core answers, then replaces the channel and the clients.
-  Future<String> _connect() async {
+  Future<String> _connect({int? generation}) async {
+    if (generation != null && !_restartGuard.isCurrent(generation)) {
+      return 'Core setup cancelled';
+    }
     final helloChannel = ClientChannel(
       '127.0.0.1',
       port: port,
@@ -352,6 +389,11 @@ class CoreInterfaceDesktop extends CoreInterface with InfraLogger {
       unawaited(helloChannel.shutdown());
     }
 
+    // The hello RPC can finish after shutdown. Never install stale channels
+    // or announce a core connection after the owning generation is invalidated.
+    if (generation != null && !_restartGuard.isCurrent(generation)) {
+      return 'Core setup cancelled';
+    }
     final previousChannel = _channel;
     _channel = ClientChannel(
       '127.0.0.1',

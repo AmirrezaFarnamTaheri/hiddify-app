@@ -31,6 +31,8 @@ jobs:
         run: gradle -p tools/network-jvm-tests --no-daemon test
       - name: Check OS callbacks never block waiting for the actor
         run: python3 -m unittest discover -s .github/scripts -p 'test_network_callback_source.py'
+      - name: Confirm upstream and local safety contracts survived integration
+        run: python3 -m unittest discover -s .github/scripts -p 'test_unified_integration_source.py'
 
   desktop-guard-dart:
     name: Desktop lifecycle guard (Flutter test)
