@@ -44,6 +44,7 @@ import com.hiddify.hiddify.constant.Bugs
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -103,7 +104,13 @@ class BoxService(
                     Intent(Application.application, Settings.serviceClass())
                 }
             }
-            ContextCompat.startForegroundService(Application.application, intent)
+            // Android 12+ refuses a foreground start from the background with an exception; the
+            // callers (boot receiver, tile, shortcut) have nobody to report it to.
+            try {
+                ContextCompat.startForegroundService(Application.application, intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "cannot start the service", e)
+            }
         }
 
         fun stop() {
@@ -150,6 +157,7 @@ class BoxService(
     private var grpcSetupMode: Long = 4L
 
     private suspend fun startService() {
+        val resources = StartupResourceRollback()
         try {
             status.postValue(Status.Starting)
             Log.d(TAG, "starting service")
@@ -159,7 +167,7 @@ class BoxService(
 
             val selectedConfigPath = Settings.activeConfigPath
             if (selectedConfigPath.isBlank()) {
-                stopAndAlert(Alert.EmptyConfiguration)
+                stopAndAlert(Alert.EmptyConfiguration, resources = resources)
                 return
             }
 
@@ -172,12 +180,16 @@ class BoxService(
                 }
             }
 
+            // Registration can partially succeed before throwing.
+            resources.beforeNetworkStart()
             DefaultNetworkMonitor.start()
             Libbox.setMemoryLimit(!Settings.disableMemoryLimit)
             activePlatformInterface = platformInterface
             // 2 = GRPC_BACKGROUND (mTLS), 4 = GRPC_BACKGROUND_INSECURE. Must match Mobile.close.
             grpcSetupMode = if (GrpcClientProvider.usesMutualTls) 2L else 4L
             try {
+                // Native initialization can acquire a gRPC server before failing.
+                resources.beforeCoreSetup()
                 Mobile.setup(
                     SetupOptions().also {
                         it.basePath = Settings.baseDir
@@ -195,11 +207,9 @@ class BoxService(
                 // the core trusts the client certificate stored in the base folder by itself
             } catch (e: Exception) {
                 Log.e(TAG, "Mobile.setup failed", e)
-                stopAndAlert(Alert.CreateService, e.message ?: e.toString())
+                stopAndAlert(Alert.CreateService, e.message ?: e.toString(), resources)
                 return
             }
-            status.postValue(Status.Started)
-
             if (Settings.startCoreAfterStartingService){
                 Mobile.start("","")
                 }
@@ -216,8 +226,9 @@ class BoxService(
                 notification.show(activeProfileName, R.string.status_started)
             }
             notification.start()
+            status.postValue(Status.Started)
         } catch (e: Exception) {
-            stopAndAlert(Alert.StartService, e.message)
+            stopAndAlert(Alert.StartService, e.message, resources)
             return
         }
     }
@@ -330,26 +341,66 @@ class BoxService(
         }
     }
 
-    private suspend fun stopAndAlert(type: Alert, message: String? = null) {
+    private suspend fun stopAndAlert(
+        type: Alert,
+        message: String? = null,
+        resources: StartupResourceRollback,
+    ) {
         Settings.startedByUser = false
-        withContext(Dispatchers.Main) {
+        // A failed Mobile.setup can leave a native gRPC listener running; the
+        // monitor can also be registered even if start() throws. Cleanup belongs
+        // off the main thread and must complete despite coroutine cancellation.
+        val cleanupErrors = withContext(NonCancellable + Dispatchers.IO) {
+            resources.rollback(
+                closeTun = {
+                    val fd = fileDescriptor
+                    fileDescriptor = null
+                    fd?.close()
+                },
+                stopNetwork = { DefaultNetworkMonitor.stop() },
+                closeCore = { Mobile.close(grpcSetupMode) },
+            )
+        }
+        cleanupErrors.forEach { Log.e(TAG, "Startup rollback could not release a resource", it) }
+        if (activePlatformInterface === platformInterface) activePlatformInterface = null
+        withContext(NonCancellable + Dispatchers.Main) {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)
                 receiverRegistered = false
             }
             notification.close()
             binder.broadcast { callback ->
-                callback.onServiceAlert(type.ordinal, message)
+                callback.onServiceAlert(
+                    type.ordinal,
+                    if (cleanupErrors.isEmpty()) message else
+                        "${message.orEmpty()} (resource cleanup incomplete; reconnect or restart may be required)",
+                )
             }
+            // Never report stopped before native and network rollback has finished.
             status.value = Status.Stopped
+            service.stopSelf()
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
-        // Already up or starting: ignore duplicate start intents.
-        if (status.value == Status.Started || status.value == Status.Starting) {
+        // Already up, and in the foreground: ignore duplicate start intents.
+        if (status.value == Status.Started) {
+            return Service.START_NOT_STICKY
+        }
+        // Every start comes through startForegroundService, and Android kills the app ("did not
+        // then call Service.startForeground()") when the service stops, or 10 seconds pass,
+        // before startForeground is called. So go to the foreground here, on the main thread,
+        // before anything slow (loading the core at boot) and before the returns below: a start
+        // that arrives while a stop is still closing the core used to return without it, and
+        // the stop's stopSelf() then crashed the app.
+        try {
+            notification.show(activeProfileName, R.string.status_starting)
+        } catch (e: Exception) {
+            Log.e(TAG, "cannot go to the foreground", e)
+        }
+        if (status.value == Status.Starting) {
             return Service.START_NOT_STICKY
         }
         // A stop is still tearing down Mobile/VPN; wait then start so reconnect
@@ -361,12 +412,7 @@ class BoxService(
                     delay(200)
                     i++
                 }
-                if (status.value == Status.Stopped) {
-                    ContextCompat.startForegroundService(
-                        Application.application,
-                        Intent(Application.application, Settings.serviceClass()),
-                    )
-                }
+                if (status.value == Status.Stopped) start()
             }
             return Service.START_NOT_STICKY
         }
@@ -384,7 +430,18 @@ class BoxService(
 
         GlobalScope.launch(Dispatchers.IO) {
             Settings.startedByUser = true
-            initialize()
+            try {
+                initialize()
+            } catch (failure: Exception) {
+                Log.e(TAG, "Service initialization failed", failure)
+                // No native setup or network registration occurred yet.
+                stopAndAlert(
+                    Alert.StartService,
+                    failure.message ?: failure.toString(),
+                    StartupResourceRollback(),
+                )
+                return@launch
+            }
 //            try {
 //                startCommandServer()
 //            } catch (e: Exception) {

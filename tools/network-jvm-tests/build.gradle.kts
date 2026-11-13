@@ -13,11 +13,11 @@ kotlin {
 sourceSets {
     main {
         kotlin.srcDir("../../android/app/src/main/kotlin")
-        kotlin.include("**/InterfaceUpdateRetry.kt", "**/PendingNetworkRequests.kt")
+        kotlin.include("**/InterfaceUpdateRetry.kt", "**/PendingNetworkRequests.kt", "**/StartupResourceRollback.kt", "**/NetworkCallbackEpoch.kt")
     }
     test {
         kotlin.srcDir("../../android/app/src/test/kotlin")
-        kotlin.include("**/InterfaceUpdateRetryTest.kt", "**/PendingNetworkRequestsTest.kt")
+        kotlin.include("**/InterfaceUpdateRetryTest.kt", "**/PendingNetworkRequestsTest.kt", "**/StartupResourceRollbackTest.kt", "**/NetworkCallbackEpochTest.kt")
     }
 }
 

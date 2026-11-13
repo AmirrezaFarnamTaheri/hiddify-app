@@ -6,9 +6,11 @@ import 'package:hiddify/core/localization/translations.dart';
 import 'package:hiddify/core/theme/theme_extensions.dart';
 import 'package:hiddify/features/chain/model/chain_enum.dart';
 import 'package:hiddify/features/chain/overview/chain_mode_icon.dart';
+import 'package:hiddify/features/connection/model/connection_doctor_evidence.dart';
 import 'package:hiddify/features/proxy/active/active_proxy_notifier.dart';
 import 'package:hiddify/features/proxy/model/connection_health.dart';
 import 'package:hiddify/features/proxy/model/proxy_entity.dart';
+import 'package:hiddify/features/proxy/model/probe_provenance.dart';
 import 'package:hiddify/features/settings/data/config_option_repository.dart';
 import 'package:hiddify/hiddifycore/generated/v2/hcore/hcore.pb.dart';
 import 'package:hiddify/singbox/model/singbox_config_enum.dart';
@@ -51,6 +53,10 @@ class ConnectionHealthSheet extends ConsumerWidget {
         ),
       );
     }
+    final probe = health.status.isRunning && health.server != null
+        ? ProbeProvenance.fromOutbound(health.server!)
+        : null;
+    final doctor = ConnectionDoctorEvidence.from(health);
     final chain = health.chain;
     final chainName = chain?.present(t) ?? '';
     final active = ref.read(activeProxyNotifierProvider.notifier);
@@ -186,12 +192,74 @@ class ConnectionHealthSheet extends ConsumerWidget {
             ),
             const Gap(20),
             _Summary(state: summaryState, title: h.title, summary: summary),
+            const Gap(16),
+            Text(h.doctorTitle, style: theme.textTheme.titleSmall),
+            const Gap(6),
+            Text(
+              '${h.doctorCoreLabel}: ${switch (doctor.core) {
+                DoctorCoreState.running => h.doctorCoreRunning,
+                DoctorCoreState.stopped => h.doctorCoreStopped,
+                DoctorCoreState.transitioning => h.doctorCoreTransitioning,
+                DoctorCoreState.unknown => h.doctorCoreUnknown,
+              }}',
+              style: theme.textTheme.bodyMedium,
+            ),
+            Text(
+              '${h.doctorRequestLabel}: ${switch (doctor.request) {
+                DoctorRequestEvidence.responded => h.doctorRequestResponded,
+                DoctorRequestEvidence.noUsableResult => h.doctorRequestNoReply,
+                DoctorRequestEvidence.unknown => h.doctorRequestUnknown,
+              }}',
+              style: theme.textTheme.bodyMedium,
+            ),
+            Text(
+              '${h.doctorRouteLabel}: ${switch (doctor.route) {
+                DoctorRouteEvidence.unverified => h.doctorRouteUnverified,
+              }}',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const Gap(4),
+            Text(h.doctorLimit, style: theme.textTheme.bodySmall),
             const Gap(20),
             for (final (i, step) in steps.indexed)
               _Rail(last: i == steps.length - 1, child: step)
                   .animate(delay: (60 * i).ms)
                   .fadeIn(duration: 220.ms)
                   .slideY(begin: .15, end: 0, duration: 220.ms, curve: Curves.easeOutCubic),
+            if (probe != null) ...[
+              const Divider(),
+              const Gap(8),
+              Text(h.probeEvidenceTitle, style: theme.textTheme.titleSmall),
+              const Gap(8),
+              Text(h.probeEvidenceSource, style: theme.textTheme.bodySmall),
+              Text(
+                switch (probe.outcome) {
+                  UrlProbeOutcome.responded => '${h.probeResponded} · ${probe.latencyMs} ms',
+                  UrlProbeOutcome.noReply => h.probeNoReply,
+                  UrlProbeOutcome.unknown => h.probeUnknown,
+                },
+                style: theme.textTheme.bodyMedium,
+              ),
+              Text(h.probeTimeUnknown, style: theme.textTheme.bodySmall),
+              Text(
+                switch (probe.ipSource) {
+                  IpProbeSource.nonCached => h.probeIpNonCached,
+                  IpProbeSource.cached => h.probeIpCached,
+                  IpProbeSource.unavailable => h.probeIpUnavailable,
+                },
+                style: theme.textTheme.bodySmall,
+              ),
+              Text(
+                switch (probe.family) {
+                  ObservedIpFamily.ipv4 => h.probeFamilyV4,
+                  ObservedIpFamily.ipv6 => h.probeFamilyV6,
+                  ObservedIpFamily.unknown => h.probeFamilyUnknown,
+                },
+                style: theme.textTheme.bodySmall,
+              ),
+              const Gap(8),
+              Text(h.probeLimit, style: theme.textTheme.bodySmall),
+            ],
             const Gap(8),
             Align(
               alignment: AlignmentDirectional.centerEnd,
