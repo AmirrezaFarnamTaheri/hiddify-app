@@ -33,5 +33,12 @@ class DefaultNetworkCallbackSourceTests(unittest.TestCase):
         self.assertIn("response.cancel()", text)
         self.assertIn("NetworkMessage.Forget(response)", text)
 
+    def test_subscriber_failure_isolation_keeps_actor_alive(self):
+        text = SOURCE.read_text(encoding="utf-8")
+        self.assertIn("SafeNetworkListenerFanout.dispatch(", text)
+        self.assertGreaterEqual(text.count("notifySafely("), 5)
+        self.assertNotIn("listeners.values.forEach", text)
+        self.assertNotIn("message.listener(network)", text)
+
 if __name__ == "__main__":
     unittest.main()
