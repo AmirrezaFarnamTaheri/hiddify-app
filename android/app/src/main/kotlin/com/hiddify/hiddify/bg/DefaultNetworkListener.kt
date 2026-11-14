@@ -44,6 +44,14 @@ object DefaultNetworkListener {
     // callbacks never execute or wait on its message-processing coroutine.
     private val actorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** Subscribers are untrusted callbacks; never let one exception terminate this actor. */
+    private fun notifySafely(listeners: Collection<(Network?) -> Unit>, network: Network?) {
+        SafeNetworkListenerFanout.dispatch(listeners, network) {
+            // Never log a callback exception: its message can contain credentials.
+            android.util.Log.w("DefaultNetworkListener", "A network subscriber callback failed")
+        }
+    }
+
     @OptIn(ObsoleteCoroutinesApi::class)
     private val networkActor =
         actorScope.actor<NetworkMessage>(capacity = Channel.UNLIMITED) {
@@ -60,7 +68,7 @@ object DefaultNetworkListener {
                             registeredCallback = register(generation)
                         }
                         listeners[message.key] = message.listener
-                        if (network != null) message.listener(network)
+                        if (network != null) notifySafely(listOf(message.listener), network)
                     }
 
                     is NetworkMessage.Get -> {
@@ -96,23 +104,19 @@ object DefaultNetworkListener {
                         if (listeners.isNotEmpty() && callbackEpoch.accepts(message.generation)) {
                             network = message.network
                             pendingRequests.resolve(message.network)
-                            listeners.values.forEach { it(network) }
+                            notifySafely(listeners.values, network)
                         }
                     }
 
                     is NetworkMessage.Update ->
                         if (callbackEpoch.accepts(message.generation) && network == message.network) {
-                            listeners.values.forEach {
-                                it(
-                                    network,
-                                )
-                            }
+                            notifySafely(listeners.values, network)
                         }
 
                     is NetworkMessage.Lost ->
                         if (callbackEpoch.accepts(message.generation) && network == message.network) {
                             network = null
-                            listeners.values.forEach { it(null) }
+                            notifySafely(listeners.values, null)
                         }
                 }
             }
